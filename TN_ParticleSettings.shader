@@ -38,9 +38,13 @@
         [MaterialToggle] _UseUVtile("UseUVTile",Float) = 0
         _UVtileXY ("UVTile",Vector) = (0,0,0,0)
         _UVtileSpd ("UVTileSpd" , Float) = 0
+/////UVRotator:
+        [Header(UV Rotator)]
+        [MaterialToggle] _UseUVRotator ("UseUVRotator", Float) = 0
+        _UVRotator_Angle ("Rotator" , Float) = 0
 /////Facing:
         [Header(FaceColor)]
-        [MaterialToggle] _Facing ("UseFacing?",Float) = 0
+        [MaterialToggle] _UseFacing ("UseFacing?",Float) = 0
         [HDR] _BackColor ("BackColor" ,Color) = (0.5,0.5,0.5,1)
 /////Stencil Settings:
         [Header(Stencil Settings)]
@@ -95,7 +99,7 @@
             };
 
             sampler2D _MainTex ; float4 _MainTex_ST; sampler2D _InterupteTex; float4 _InterupteTex_ST;
-            float _X_Speed; float _Y_Speed; float _Fresnel_Range; float _Fresnel_Intensity; float _Fresnel; float _SceneUV; float _InterupteValue; float _InterupteToggle; float _desaturate; float _colorGradient; float _GradientValue; float _UseUVtile; float _UVtileSpd; float _Facing;
+            float _X_Speed; float _Y_Speed; float _Fresnel_Range; float _Fresnel_Intensity; float _Fresnel; float _SceneUV; float _InterupteValue; float _InterupteToggle; float _desaturate; float _colorGradient; float _GradientValue; float _UseUVtile; float _UVtileSpd; float _UseFacing; float _UseUVRotator; float _UVRotator_Angle;
             float4 _MainColor; float4 _Fresnel_Color; float4 _desaturateColor; float4 _color1; float4 _color2; float4 _UVtileXY; float4 _BackColor;
 
             VertexOutput vert (VertexInput v ){
@@ -118,7 +122,8 @@
                 o.normal = normalize(o.normal);
                 float3 viewDir = normalize(_WorldSpaceCameraPos.xyz-o.posWorld.xyz);
 /////////Facing:
-                float3 FaceColor = (facing >= 0 ? 1 : _BackColor);
+                float3 FaceColor = 1;
+                if(_UseFacing){ FaceColor = (facing >= 0 ? _BackColor : 1); }
                 //float isFrontFace = ( facing >= 0 ? 1 : 0 );
                 //float faceSign = ( facing >= 0 ? 1 : -1 );
 /////////UVTile:
@@ -143,6 +148,14 @@
                 }
                 if(_UseUVtile){
                     SceneUV = (SceneUV+float2(UVTile_X,UVTile_Y)) * UVTile;
+                }
+/////////UV Rotator:
+                float UVRotator_cos , UVRotator_sin = 0;
+                if(_UseUVRotator){
+                    UVRotator_cos = cos(_UVRotator_Angle * _Time.g);
+                    UVRotator_sin = sin(_UVRotator_Angle * _Time.g);
+                    float2 Pivot = float2(0.5,0.5);
+                    SceneUV = mul( SceneUV - Pivot , float2x2( UVRotator_cos , -UVRotator_sin , UVRotator_sin , UVRotator_cos))+ Pivot;
                 }
 /////////Fresnel :
                 float3 fresnel = pow(1-max(0,(dot(viewDir,o.normal))),_Fresnel_Range);
