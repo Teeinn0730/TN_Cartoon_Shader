@@ -1,4 +1,6 @@
-﻿Shader "TN/Cartoon_Shader"
+﻿// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
+
+Shader "TN/Cartoon_Shader"
 {
 	Properties
 	{
@@ -29,7 +31,7 @@
 		_Fresnel_pow("Fresnel_pow",Range(-1,1)) = 0
 		_Specular_pow("Specular",Range(0,1))=0
 		[Header(OutLineProp     OutLineProp     OutLineProp)][Space][Space]
-		_OutLine_Width("OutLineScale",Range(0,10)) = 0
+		_OutLine_Width("OutLineScale",Range(0,100)) = 0
 		_OutLine_Color("OutLineColor",Color) = (0,0,0,0)
 		_OutLine_Color2("OutLineColor2",Color) = (0,0,0,0)
 		_OutLine_CutOff("OutLineCutStep",Range(-0.1,1)) = 0.5
@@ -44,7 +46,6 @@
 	SubShader{
 		Tags{
 			"Queue" = "Geometry"
-			"RenderType"="Transparent"
 		}
 		Pass{
 			Name"OutLine描邊"
@@ -75,7 +76,7 @@
 				float4 tangent : TANGENT;
 				float3 color : COLOR;
 				float2 texcoord0 : TEXCOORD0;
-				//float4 uv1 : TEXCOORD1;
+				float4 uv1 : TEXCOORD1;
 				};
 			struct VertexOutput {
 				float4 pos : SV_POSITION;
@@ -86,11 +87,13 @@
 			VertexOutput vert(VertexInput i) {
 				VertexOutput o = (VertexOutput) 0;
 				o.uv0 = i.texcoord0;
-				//i.uv1 = i.uv1*2 -1 ;
+				//i.tangent.w =0 ;
 				//i.uv1.z = i.normal.y;
-				float3 offset = UnityObjectToClipPos(i.tangent).xyz; 
+				float3 clipnormal =mul((float3x3) UNITY_MATRIX_MVP , i.tangent.xyz );
 				o.pos = UnityObjectToClipPos(i.vertex);
-				o.pos.xy += offset / _ScreenParams.xy *_OutLine_Width * o.pos.w * i.color.r ;
+				float2 offset = normalize(clipnormal.xy) / _ScreenParams.xy * _OutLine_Width *o.pos.w * i.color.r;
+				o.pos.xy +=offset;
+				//o.pos.xy += offset / _ScreenParams.xy * _OutLine_Width * o.pos.z;
 				o.posWorld = mul(unity_ObjectToWorld , i.vertex);
 				return o;
 				}
@@ -166,6 +169,7 @@
 				float2 texcoord0 : TEXCOORD0;
 				float4 uv1 : TEXCOORD1;
 				float3 color : COLOR;
+				float4 tangent : TANGENT;
 			};
 			struct VertexOutput {
 				float4 pos : SV_POSITION;
@@ -182,13 +186,14 @@
 				o.posWorld = mul(unity_ObjectToWorld, v.vertex);
 				o.normalDir = UnityObjectToWorldNormal(v.normal);
 				o.uv0 = v.texcoord0;
-				o.uv1 = v.uv1;
+				o.uv1 = v.tangent;
 				o.color = v.color;
 				TRANSFER_VERTEX_TO_FRAGMENT(o)
 				return o;
 			}
 ////// Frag:
 			float4 frag ( VertexOutput o, float facing : VFACE) : SV_Target {
+				//return o.uv1;
 				float3 LightColor = _LightColor0.rgb;
 				float faceSign = (facing >= 0 ? 1 : -1);
 				float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz - o.posWorld.xyz);
