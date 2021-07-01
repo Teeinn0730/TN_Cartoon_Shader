@@ -46,6 +46,15 @@
         [Header(FaceColor)]
         [MaterialToggle] _UseFacing ("UseFacing?",Float) = 0
         [HDR] _BackColor ("BackColor" ,Color) = (0.5,0.5,0.5,1)
+/////Alpha Texture:
+        [Header(Alpha Tex(Need UV0 Custom.z))]
+        [MaterialToggle] _UseAlphaTex ("UseAlphaTex?",Float) = 0
+        _AlphaTexture("AlphaTexture",2D)="white"{}
+        _AlphaTexture_Step("AlphaTexture_Step",Range(0,0.5)) = 0
+/////Decal Shader:
+        [Header(Decal(Need open SceneUV and Depth Cam))]
+        [MaterialToggle] _UseDecal ("UseDecal?" , Float) = 0
+        _NormalClipThreshold("NormalClip",Range(0,0.3)) = 0.1
 /////Stencil Settings:
         [Header(Stencil Settings)]
         _Ref ("Ref",Float) = 0
@@ -96,18 +105,30 @@
                 float3 normal : TEXCOORD1;
                 float4 projPos : TEXCOORD2;
                 float4 vertexColor : COLOR;
+                float4 uv : TEXCOORD3;
+                float3 ray : TEXCOORD4;
+                //float3 yDir : TEXCOORD5;
             };
 
-            sampler2D _MainTex ; float4 _MainTex_ST; sampler2D _InterupteTex; float4 _InterupteTex_ST;
-            float _X_Speed; float _Y_Speed; float _Fresnel_Range; float _Fresnel_Intensity; float _Fresnel; float _SceneUV; float _InterupteValue; float _InterupteToggle; float _desaturate; float _colorGradient; float _GradientValue; float _UseUVtile; float _UVtileSpd; float _UseFacing; float _UseUVRotator; float _UVRotator_Angle;
-            float4 _MainColor; float4 _Fresnel_Color; float4 _desaturateColor; float4 _color1; float4 _color2; float4 _UVtileXY; float4 _BackColor;
+            sampler2D _MainTex , _InterupteTex , _AlphaTexture , _CameraDepthTexture , _CameraGBufferTexture2 ;
+            float4 _InterupteTex_ST ,  _MainTex_ST , _AlphaTexture_ST ;
+            float _X_Speed , _Y_Speed , _Fresnel_Range , _Fresnel_Intensity , _Fresnel , _SceneUV , _InterupteValue , _InterupteToggle , _desaturate , _colorGradient , _GradientValue , _UseUVtile , _UVtileSpd , _UseFacing , _UseUVRotator , _UVRotator_Angle , _UseAlphaTex , _AlphaTexture_Step , _NormalClipThreshold , _UseDecal , _UseVertexExtrude ;
+            float4 _MainColor , _Fresnel_Color , _desaturateColor , _color1 , _color2 , _UVtileXY , _BackColor;
 
+/////   InverseLerp func :
+            float InverseLerp(float a , float b , float c){ 
+                return saturate((c-a)/(b-a));
+			}
+/////   Vert:
             VertexOutput vert (VertexInput v ){
                 VertexOutput o = (VertexOutput)0;
                 o.vertexColor = v.vertexColor;
                 o.normal = UnityObjectToWorldNormal(v.normal); 
+                o.uv = v.uv ;
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.posWorld = mul(unity_ObjectToWorld,v.vertex);
+                o.ray = 0;
+                //o.yDir = 0;
                 if(_SceneUV){
                     o.projPos = ComputeScreenPos(o.pos);
                     COMPUTE_EYEDEPTH(o.projPos.z);
@@ -115,6 +136,10 @@
                 else{
                      o.projPos = v.uv;
                 }
+                if(_UseDecal){
+                    o.ray = UnityObjectToViewPos(v.vertex) * float3(1,1,-1);
+                    //o.yDir = mul((float3x3)unity_ObjectToWorld,float3(0,1,0));
+				}
                 return o;
             }
 
@@ -160,6 +185,20 @@
 /////////Fresnel :
                 float3 fresnel = pow(1-max(0,(dot(viewDir,o.normal))),_Fresnel_Range);
                 float3 fresnel_Color = fresnel * _Fresnel_Color *_Fresnel_Intensity;
+/////////Decal: 
+                if(_UseDecal){
+                    float depth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture , SceneUV);
+				    float viewDepth = Linear01Depth(depth) * _ProjectionParams.z;
+                    float3 viewPos = o.ray * viewDepth / o.ray.z ; 
+                    float4 worldPos = mul (unity_CameraToWorld , float4(viewPos,1 ) ) ;
+                    float3 objectPos = mul (unity_WorldToObject , worldPos);
+                    //objectPos = UnityObjectToWorldPos(float4(objectPos,0));
+                    clip(float3(0.5,0.5,0.5) - abs(objectPos));
+                    //float3 worldNormal = tex2D(_CameraGBufferTexture2,SceneUV).rgb*2-1;
+                    //float3 yDir = normalize(o.yDir) ;
+                    //clip(dot( yDir , worldNormal ) - _NormalClipThreshold );
+                    SceneUV = objectPos.xz + 0.5;
+                }
 /////////FinalColor :
                 float4 MainTex = tex2D(_MainTex,TRANSFORM_TEX(SceneUV,_MainTex));
 /////////Desaturate:
@@ -175,13 +214,20 @@
                        MainTex.rgb = MainTex.rgb*_desaturateColor.rgb;
                     }
                 }
+/////////Alpha:
+                float4 AlphaTexture = 1;
+                float Alpha =  MainTex.a*o.vertexColor.a ; 
+                if(_UseAlphaTex){
+                    AlphaTexture = tex2D(_AlphaTexture,TRANSFORM_TEX(o.uv,_AlphaTexture));
+                    Alpha *= saturate(InverseLerp( _AlphaTexture_Step , 1-_AlphaTexture_Step , AlphaTexture.r)+o.uv.z); 
+				}
 /////////FinalColor:
                 float3 MainTex2 = MainTex.rgb*_MainColor.rgb*o.vertexColor.rgb+ fresnel_Color;
                 if(_Fresnel){
-                    return float4(MainTex2*FaceColor,MainTex.a*o.vertexColor.a);
+                    return float4(MainTex2*FaceColor,Alpha);
                 }
                 else{
-                     return float4(MainTex.rgb*_MainColor.rgb*o.vertexColor.rgb*FaceColor ,  MainTex.a*o.vertexColor.a);
+                     return float4(MainTex.rgb*_MainColor.rgb*o.vertexColor.rgb*FaceColor ,  Alpha);
                 }
             }
             ENDCG
