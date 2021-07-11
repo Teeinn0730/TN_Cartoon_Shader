@@ -17,9 +17,9 @@
 		[MaterialToggle] _useShadowMap_G ("useShadowMap_G(陰影遮蔽區域//e.g 腋下、脖子、奶子下方)",Float) = 0 /////ShadowMap 的G通道: 陰影遮蔽區域(e.g 腋下、脖子、奶子下方，都是平常光照不到的地方，可以直接手繪方式去做硬陰影(參考原神)) 
 		[MaterialToggle] _useShadowMap_B ("useShadowMap_B(頭髮高光區域)",Float) = 0 /////ShadowMap 的B通道: 頭髮高光區域
 		[HDR] _LightHair_Color ("LightHair_Color(頭髮高光顏色)",Color) = (1,1,1,1)
-		_Metal_Spec_Emi_Map("Metal_Specualr_Emission Map(金屬R+發光貼圖B)",2D) = "white"{}
+		_Metal_FLight_Emi_Map("Metal_Specualr_Emission Map(金屬R+發光貼圖B)",2D) = "white"{}
 		[MaterialToggle] _useMetalMask ("useMetalMask(金屬物品遮罩)",Float) = 0
-		//[MaterialToggle] _useSpecularMask ("useSpecularMask(暫未使用)",Float) = 0
+		[MaterialToggle] _useFluidLightMask ("useFluidLightMask(流光遮罩)",Float) = 0
 		[MaterialToggle] _useEmissionlMask ("useEmissionMask(發光遮罩)",Float) = 0
 		_Specular_pow("Specular(高光範圍)",Range(0.1,1))=0.1
 		_Metal_Intensity("Metal_Intensity(金屬高光強度)",Range(0,10)) = 1
@@ -34,22 +34,23 @@
 		_Fresnel_End("Fresnel_End(背光範圍2)",Range(0,1)) = 1
 		[Header(OutLineProp     OutLineProp     OutLineProp)][Space][Space]
 		[MaterialToggle] _useTangentNormal ("useTangentNormal(使用特殊法線製作描邊才打勾)",Float) = 0
+		[MaterialToggle] _Outline_ZWrite ("Outline_ZWrite(描邊遮醜)",Float) = 1
 		_OutLine_Width("OutLineWidth(描邊粗細)",Range(0,100)) = 0
 		_OutLine_Color("OutLineColor(主描邊顏色)",Color) = (0,0,0,0)
 		_OutLine_Color2("OutLineColor2(副描邊顏色)",Color) = (0,0,0,0)
-		_OutLine_CutOff("OutLineCutStep(描邊裁切//用於透明物體)",Range(-0.1,1)) = 0.5
+		_OutLine_CutOff("OutLineCutStep(描邊裁切//用於透明物體)",Range(-0.1,1)) = 1
 		[Header(AlphaProp     AlphaProp     AlphaProp)][Space][Space]
 		_Alpha("Alpha(透明度)",Range(0,1)) = 1
 		[Header(SpecialProp     SpecialProp     SpecialProp)][Space][Space]
-		_Special_Mask("SpecialMask(特殊遮罩// R:換膚色 G:霓光 )",2D) = "black"{}
-		[HDR] _SkinColor2("SkinColor2(Alpha可控制)",Color) = (1,1,1,1)
-		_NieoLight_Color("NieoLight_Color(Alpha可控制)",Color) = (1,1,1,1)
-		/*
+		_Special_Mask("SpecialMask(特殊遮罩// R:換膚色 G:霓光 B:臉紅 A:流光)",2D) = "black"{}
+		[HDR] _SkinColor2("SkinColor2(Alpha可控制)",Color) = (1,1,1,0)
+		_NieoLight_Color("NieoLight_Color(Alpha可控制)",Color) = (1,1,1,0)
 		_ShyPos("ShyPos",Range(0,1)) = 0
-		_ShySmooth("ShySmooth",Range(0,1)) = 0
-		[HDR]_ShyColor("ShyColor",Color) = (1,1,1,1)
-        _Mask("Mask",2D) = "white"{}
-		*/
+		_ShySmooth("ShySmooth",Range(-1,1)) = 0
+		[HDR] _ShyColor("ShyColor",Color) = (1,1,1,0)
+		_FluidLightVector ("FluidLightVector(x:流動速度 y:流光範圍 z:流光強度 w:啟用填1)",Vector)=(0,0,0,0)
+		//[HideInInspector] _BehitColor("BehitColor",Color) = (0,0,0,1)
+		[HideInInspector] _Color ("Color",Color) = (0,0,0,1)
 		[Header(Stencil Settings)][Space][Space]
         _Ref ("Ref",Float) = 0
         [Enum(UnityEngine.Rendering.CompareFunction)] _Comp ("Comparison",Float) = 0
@@ -65,14 +66,14 @@
 
 	SubShader{
 		Tags{
-			"Queue" = "Geometry"
+			//"Queue" = "Geometry"
 		}
 		Pass{
 			Name"OutLine描邊"
 			Tags{
 			}
 			Cull Front //有Pass在前面的話則不渲染
-			ZWrite On
+			ZWrite [_Outline_ZWrite]
 			CGPROGRAM
 ///////pragma參數設定
 			#pragma vertex vert
@@ -80,11 +81,12 @@
 			#pragma fragmentoption ARB_precision_hint_fastest //在執行片元計算時，縮減浮點位元精度，加快計算速度 //ARB_precision_hint_nicest 則反之
 			#pragma target 3.0
 			#include "UnityCG.cginc"
+			#include "Lighting.cginc"
 			//#pragma multi_compile_shadowcaster 用途是使shader支援關於shadowcaster的一些巨集定義，以便支援point light與其他光源的不同處理
 ///////參數材質建構:
 			sampler2D _MainTex; float4 _MainTex_ST;
 			sampler2D _ShadowMap ;
-			float _OutLine_CutOff , _useTangentNormal , _useShadowMap_R , _OutLine_Width , _useShadowMask  ; 
+			float _OutLine_CutOff , _useTangentNormal , _useShadowMap_R , _OutLine_Width , _useShadowMask , _useTNCartoonOutline ; 
 			float4 _OutLine_Color , _OutLine_Color2 , _SkinColor2;
 ///////模型資訊建構:
 			struct VertexInput {
@@ -102,7 +104,7 @@
 				};
 			VertexOutput vert(VertexInput i) {
 				VertexOutput o = (VertexOutput) 0;
-				if(_OutLine_Width == 0){
+				if(_OutLine_Width == 0 || _useTNCartoonOutline == 1 ){
 					return o;
 				}
 				o.uv0 = i.texcoord0;
@@ -138,8 +140,7 @@
 			}
 ////// Frag:
 			float4 frag(VertexOutput o) : SV_Target{
-				if(_OutLine_Width == 0){
-					discard;
+				if(_OutLine_Width == 0 ){
 					return 0;
 				}
 				float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz - o.posWorld.xyz);
@@ -151,6 +152,7 @@
 ////// 部分配件使用貼圖更換描邊的顏色:
 				float ShadowMask = tex2D( _ShadowMap , o.uv0 ).r;
 				OutLineColor2 = OutLineColor.rgb * lerp( _OutLine_Color.rgb , _OutLine_Color2.rgb , ShadowMask*_useShadowMap_R);
+				OutLineColor2 *= _LightColor0.rgb+0.3;
 ////// 輸出顏色:
 				return float4 ( OutLineColor2.rgb , 1) ;
 			}
@@ -175,18 +177,18 @@
 			CGPROGRAM
 ///////pragma參數設定:
 			#pragma vertex vert
-			#pragma fragment frag
-			#pragma target 2.0
+			#pragma fragment frag 
+			#pragma target 3.0
 			#pragma fragmentoption ARB_precision_hint_fastest 
-			#pragma multi_compile_fwdbase
+			//#pragma multi_compile_fwdbase
 			#include "UnityCG.cginc"
 			#include "AutoLight.cginc"
 			#include "Lighting.cginc"
 ///////參數材質建構:
-			sampler2D _MainTex , _ShadowMap , _Metal_Spec_Emi_Map , _NormalMap , _Special_Mask;
+			sampler2D _MainTex , _ShadowMap , _Metal_FLight_Emi_Map , _NormalMap , _Special_Mask;
 			float4 _MainTex_ST , _NormalMap_ST , _Special_Mask_ST;
-			float _LdotN_End, _LdotN_Start , OutLine_Width , OutLine_CutOff , _ColorChange , _Alpha , _useShadowMap_R ,  _useShadowMap_G ,  _useShadowMap_B , _Fresnel_Start , _Fresnel_End , _Specular_pow , _useMetalMask , _useSpecularMask , _useEmissionlMask  , _Metal_Intensity , _LightWrap_Start, _LightWrap_End  , _Normal_Intensity  ;
-			float4 _MainColor , _ShadowColor , _ShadowColor2 , _FresnelColor , OutLine_Color , _SkinColorChange , _LightWrap1 , _LightWrap2 , _LightHair_Color , _NieoLight_Color , _SkinColor2 , _Emission_Color; 
+			float _LdotN_End, _LdotN_Start , OutLine_Width , OutLine_CutOff , _ColorChange , _Alpha , _useShadowMap_R ,  _useShadowMap_G ,  _useShadowMap_B , _Fresnel_Start , _Fresnel_End , _Specular_pow , _useMetalMask , _useSpecularMask , _useEmissionlMask  , _Metal_Intensity , _LightWrap_Start, _LightWrap_End  , _Normal_Intensity , _ShyPos , _ShySmooth , BeHitTime , useFresnel ;
+			float4 _MainColor , _ShadowColor , _ShadowColor2 , _FresnelColor , OutLine_Color , _SkinColorChange , _LightWrap1 , _LightWrap2 , _LightHair_Color , _NieoLight_Color , _SkinColor2 , _Emission_Color , _ShyColor , _Color , _FluidLightVector ; 
 ////// 建構RGB2HSV函式:
 /*
 			float3 rgb2hsv(float3 c) {
@@ -218,6 +220,10 @@
 			float3 Hue( float3 a ){
 				return saturate(3*abs(1-2*frac(a+float3(0,0.33,0.66)))-1);
 			}
+////// InverseLerp function:
+			float InverseLerp (float a , float b , float c ) {
+				return saturate((c-a)/(b-a));
+			}
 ///////模型資訊建構:
 			struct VertexInput {
 				float4 vertex : POSITION;
@@ -235,19 +241,17 @@
 				float3 bitangentDir : TEXCOORD6;
 			};
 			VertexOutput vert(VertexInput v) {
-				VertexOutput o;
+				VertexOutput o = (VertexOutput)0;
 				o.pos = UnityObjectToClipPos(v.vertex);
 				o.posWorld = mul(unity_ObjectToWorld, v.vertex);
-				o.normalDir = normalize(UnityObjectToWorldNormal(v.normal));
 				o.uv0 = v.texcoord0;
+				o.normalDir = normalize(UnityObjectToWorldNormal(v.normal));
 				o.tangentDir = UnityObjectToWorldNormal(v.tangent);
 				o.bitangentDir = cross(o.normalDir,o.tangentDir) * v.tangent.w;
+////// bitangentDir:
+				float3 bitangentDir = cross(normalize(v.normal),normalize(v.tangent)) * v.tangent.w;
 				TRANSFER_VERTEX_TO_FRAGMENT(o)
 				return o;
-			}
-////// InverseLerp function:
-			float InverseLerp (float a , float b , float c ) {
-				return saturate((c-a)/(b-a));
 			}
 ////// Frag:
 			float4 frag ( VertexOutput o, float facing : VFACE) : SV_Target {
@@ -261,7 +265,7 @@
 				float4 MainTex = tex2D(_MainTex, TRANSFORM_TEX(o.uv0, _MainTex));
 				float4 ShadowMap = tex2D( _ShadowMap , o.uv0 ); 
 				float4 SpecialMask = tex2D( _Special_Mask , TRANSFORM_TEX(o.uv0 , _Special_Mask));
-//////NormalMap: 
+////// NormalMap: 
 				float3 NormalMap = UnpackNormal(tex2D(_NormalMap , TRANSFORM_TEX(o.uv0,_NormalMap)));
 				NormalMap.rg *=_Normal_Intensity;
 				float3x3 tangentTransform = float3x3(o.bitangentDir,o.tangentDir,o.normalDir);
@@ -277,8 +281,8 @@
 ////// Shadow Color:
 				float3 ShadowColor =  ( _useShadowMap_R * lerp( _ShadowColor.rgb , _ShadowColor2.rgb , ( ShadowMap.r )) + (1-_useShadowMap_R) * _ShadowColor.rgb )* MainTex;
 ////// Emission:
-				float4 Metal_Spec_Emi_tex = tex2D( _Metal_Spec_Emi_Map , o.uv0 );
-				float3 EmissionColor = _useEmissionlMask * Metal_Spec_Emi_tex.b * MainTex.rgb * saturate(sin(_Time.g)) * _Emission_Color.rgb * _Emission_Color.a ;
+				float4 Metal_FLight_Emi_tex = tex2D( _Metal_FLight_Emi_Map , o.uv0 );
+				float3 EmissionColor = _useEmissionlMask * Metal_FLight_Emi_tex.b * MainTex.rgb * saturate(sin(_Time.g)) * _Emission_Color.rgb * _Emission_Color.a ;
 ////// Back Light:
 				float Fresnel =1-max(0,(dot( ViewDir , NormalDir )));
 				Fresnel = InverseLerp( _Fresnel_Start , _Fresnel_End , Fresnel) ;
@@ -287,7 +291,7 @@
 ////// Metal Light:
 				float3 halfLight = normalize( LightDir + ViewDir );
 				float3 HLdotN = (saturate(dot(halfLight,NormalDir)));
-				float3 MetalLight = _useMetalMask * Metal_Spec_Emi_tex.r * _LightColor0.rgb * pow(HLdotN , _Specular_pow *100)*_Metal_Intensity;
+				float3 MetalLight = _useMetalMask * Metal_FLight_Emi_tex.r * _LightColor0.rgb * pow(HLdotN , _Specular_pow *100)*_Metal_Intensity;
 ////// Hair Light:
 				float3 LightHair = _useShadowMap_B * pow(HLdotN , 5) * ShadowMap.b * _LightHair_Color ;
 ////// Final Color:
@@ -305,9 +309,28 @@
 ////// Nieo Light:
 				float3 NieoLight = Hue(VdotN);
 				NieoLight = OverlayFunc(NieoLight,_NieoLight_Color)*_NieoLight_Color.a*SpecialMask.g;
+////// ShyColor:
+				float ShyPos = 1-pow(saturate( o.uv0.y + _ShySmooth ),10);
+				float3 ShyPos2 =  ShyPos * _ShyColor.rgb * _ShyColor.a * SpecialMask.b;
+////// Be hit Effect: 
+				/*float3 BehitEffect = BeHitColor.rgb*saturate(BeHitTime);
+				if(useFresnel){
+					float BeHitFresnel = pow(1-max(0,(dot( ViewDir , NormalDir ))),2);
+					BehitEffect *= BeHitFresnel;
+				}*/
+////// FluidLightVector:
+				float3 FluidLight = 0;
+				if(_FluidLightVector.w == 1){
+					float FluidSpeed = pow(abs(sin((o.uv0.y*3.14 ) + (_FluidLightVector.x * _Time.y ))),_FluidLightVector.y);
+					FluidLight = saturate(SpecialMask.a * sin(FluidSpeed) * _FluidLightVector.z);
+				}
 ////// Final Color :
-				float3 FinalColor3 = FinalColor2_Blend_Screen * _LightColor0.rgb;
-				FinalColor3 = FinalColor3 + MetalLight + EmissionColor + LightHair + NieoLight ;
+				float3 LightColor_Instead = _LightColor0.rgb + 0.3; //這個要記得移除 暫代用而已 應該會是下個大包版的時候 原因是沒辦法一次就把所有腳色的光源確定 有的腳色會爆亮 所以就先只能先加亮。
+				float3 FinalColor3 = FinalColor2_Blend_Screen * LightColor_Instead;
+				FluidLight *= FinalColor3;
+				FinalColor3 = (FinalColor3 + MetalLight + EmissionColor + LightHair + NieoLight + FluidLight )* _Color.rgb;
+				//FinalColor3 = lerp(FinalColor3,BehitEffect*FinalColor3,BeHitTime);
+				FinalColor3 = lerp( FinalColor3 , (FinalColor3*(ShyPos2+1-ShyPos)) , _ShyPos*SpecialMask.b);
 				return float4( FinalColor3 , _Alpha);
 				}
 			ENDCG
@@ -403,4 +426,5 @@
 			ENDCG
 		}
 	}
+	Fallback "ToonTwoStepsShader"
 }
