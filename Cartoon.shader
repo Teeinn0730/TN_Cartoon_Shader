@@ -56,6 +56,7 @@
 				o.vertex = UnityObjectToClipPos(v.vertex);
 				half2 offset = normalize(clipnormal.xy) / _ScreenParams.xy * _OutLine *o.vertex.w * v.color.r;
 				o.vertex.xy += offset;
+                o.vertex.z *=0.995;
                 v.normal = normalize(v.normal);
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 return o;
@@ -106,8 +107,8 @@
             };
 
             sampler2D _MainTex , _LightMap , _RampColor ,_FaceMap ,_CameraDepthTexture;
-            float4 _MainTex_ST , _FaceShadowColor ;
-            half _UseFaceMap , _RampColorCount , LightDirEulerRotateX;
+            float4 _MainTex_ST , _FaceShadowColor , LightDirEulerRotate ;
+            half _UseFaceMap , _RampColorCount ;
 
             v2f vert (appdata v)
             {
@@ -115,7 +116,7 @@
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 o.normal = (UnityObjectToWorldNormal(v.normal));
-                o.worldPos = UnityObjectToWorldDir(v.vertex);
+                o.worldPos = mul(unity_ObjectToWorld, v.vertex);
                 o.projPos = ComputeScreenPos(o.pos);
                 return o;
             }
@@ -130,31 +131,24 @@
                     attenuation = tex2D(_ShadowMapTexture, depthUV); 
                     //attenuation = saturate(attenuation+0.5);
 //// DepthTex: //硬邊緣高光需要有深度圖來做使用，一般來說只要開啟陰影投射，就必須使用到深度圖，所以不用白不用就寫在一起了。
-                    const float limitoffset = 0.001/o.pos.w;
-                    const float2 depthoffset = float2(-limitoffset,limitoffset);
+                    half rimSide = sin(radians(LightDirEulerRotate.y)); //根據光線的方向去做深度圖UV的偏移。
+                    const float limitoffset = 0.003/o.pos.w;
+                    const float2 depthoffset = float2(rimSide*limitoffset,limitoffset);
 				    half2 depthUVOffset = depthUV + depthoffset;
-				    half2 depthUVOffset2 = depthUV - depthoffset;
 				    half depth = tex2D(_CameraDepthTexture, depthUVOffset).r;
-				    half depth_anti = tex2D(_CameraDepthTexture, depthUVOffset2).r;
-				    depth = min(depth,depth_anti);
 				    rim = saturate(o.pos.z-depth);
 				    rim = step(0.01,rim);
                     rim *= 0.3;
                 #endif
 ///// Struct Light:
                 float3 LightDir = _WorldSpaceLightPos0.xyz;
-                float3 ViewDir = _WorldSpaceCameraPos.xyz-o.worldPos.xyz;
+                float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz-o.worldPos.xyz);
                 float LDotN = (dot(LightDir,o.normal))*0.5+0.5;
                 float LDotV = 1-dot(normalize(_WorldSpaceCameraPos.xyz),LightDir);
-////// Lighting:
-				//UNITY_LIGHT_ATTENUATION(attenuation, o, o.posWorld.xyz); //因為Direcation Light也就是太陽光 並沒有像點光源一樣的球形衰弱計算 所以不用賦予這個值在ForwardBase裡面。
-                //UNITY_LIGHT_ATTENUATION(attenuation, o, o.worldPos.xyz); // 新版定義: UNITY_LIGHT_ATTENUATION(attenuation, i, i.posWorld.xyz)
-                //return attenuation;
+                float VdotN = 1-saturate(normalize(dot(ViewDir.xyz,o.normal)));
 ///// Struct Texture:
                 fixed4 LightMap = tex2D(_LightMap,o.uv);
                 fixed4 RampColor = tex2D(_RampColor,float2(saturate(LDotN*attenuation),LightMap.a+(1/(_RampColorCount*2))));//使用黑白灰階圖讀取要使用的顏色條，但是因為各種顏色值都為極端值，所以必須讓這些顏色條的UV往上0.5格。根據你有幾條顏色就除以2倍的顏色條數量。
-                //return fixed4(LightMap.zzz,1);
-                //return min(LDotN,(LDotN*attenuation));
                 fixed4 col = tex2D(_MainTex, o.uv );
                 col.rgb *= RampColor.rgb;
                 col.rgb *= _LightColor0.rgb;
@@ -172,7 +166,7 @@
                     if(FrontRight < 0)
                         FaceMap = tex2D(_FaceMap,float2(-o.uv.x,o.uv.y));
 
-                    float fixdegress = abs(cos(radians(LightDirEulerRotateX)));//因應平行光的X軸會影響貼圖的閾值，所以貼圖顏色跟著Clamp。
+                    float fixdegress = abs(cos(radians(LightDirEulerRotate.x)));//因應平行光的X軸會影響貼圖的閾值，所以貼圖顏色跟著Clamp。
                     float FaceShadow = smoothstep(FaceMap.r*fixdegress,(FaceMap.r+0.01)*fixdegress,UpRight);
                     float4 MainTex = tex2D(_MainTex,o.uv);
                     MainTex.rgb = lerp(MainTex.rgb*RampColor.rgb,MainTex.rgb,FaceShadow*attenuation);
@@ -180,10 +174,6 @@
                     return fixed4(MainTex.rgb,1);
                 }
 ///// High Light:
-                //float halfLambert = normalize(LightDir+ViewDir);
-                //halfLambert = dot(halfLambert,o.normal);
-                //halfLambert = halfLambert>0.9;
-                //halfLambert = pow(halfLambert,100);
                 float3 reflactionDir = reflect(-LightDir,o.normal);
                 reflactionDir = reflactionDir*0.5+0.5;
                 float VdotRE = DotClamped(ViewDir,reflactionDir);
@@ -191,9 +181,8 @@
                 Specular = pow(Specular,100);
                 Specular *= LightMap.z*20;
                 half3 MetalLight = LightMap.z*(VdotRE>0.85)*3;
-				
-                col.rgb += MetalLight + Specular + (rim*LDotV);
-                //return fixed4(Specular.rrr,1);
+
+                col.rgb += MetalLight + Specular + LDotV*VdotN*rim;
                 return fixed4(col.rgb,1);
             }
             ENDCG
