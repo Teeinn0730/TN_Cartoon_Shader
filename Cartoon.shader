@@ -132,20 +132,26 @@
                     //attenuation = saturate(attenuation+0.5);
 //// DepthTex: //硬邊緣高光需要有深度圖來做使用，一般來說只要開啟陰影投射，就必須使用到深度圖，所以不用白不用就寫在一起了。
                     half rimSide = sin(radians(LightDirEulerRotate.y)); //根據光線的方向去做深度圖UV的偏移。
-                    const float limitoffset = 0.003/o.pos.w;
+                    const float limitoffset = 0.01/o.pos.w; //值如果太小，鏡頭拉遠很容易會被直接忽略掉，造成clip的現象。
                     const float2 depthoffset = float2(rimSide*limitoffset,limitoffset);
 				    half2 depthUVOffset = depthUV + depthoffset;
 				    half depth = tex2D(_CameraDepthTexture, depthUVOffset).r;
-				    rim = saturate(o.pos.z-depth);
-				    rim = step(0.01,rim);
-                    rim *= 0.3;
+				    half depthOriginal = tex2D(_CameraDepthTexture, depthUV).r;
+                    depth = Linear01Depth(depth);
+                    depthOriginal = Linear01Depth(depthOriginal);
+				    rim = depth-depthOriginal;
+                    rim = step(0.0001/o.pos.w,rim); //除以o.pos.w可以出現更多高量的細節。
+                    rim *= _LightColor0.a;
                 #endif
 ///// Struct Light:
                 float3 LightDir = _WorldSpaceLightPos0.xyz;
                 float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz-o.worldPos.xyz);
                 float LDotN = (dot(LightDir,o.normal))*0.5+0.5;
                 float LDotV = 1-dot(normalize(_WorldSpaceCameraPos.xyz),LightDir);
-                float VdotN = 1-saturate(normalize(dot(ViewDir.xyz,o.normal)));
+                //float VdotN = 1-saturate(normalize(dot(ViewDir.xyz,o.normal)));
+                float VdotN = 1-saturate(dot(ViewDir.xyz,o.normal));
+                VdotN = InverseLerp(0.5,1,VdotN);
+                //return fixed4(VdotN.xxx,1);
 ///// Struct Texture:
                 fixed4 LightMap = tex2D(_LightMap,o.uv);
                 fixed4 RampColor = tex2D(_RampColor,float2(saturate(LDotN*attenuation),LightMap.a+(1/(_RampColorCount*2))));//使用黑白灰階圖讀取要使用的顏色條，但是因為各種顏色值都為極端值，所以必須讓這些顏色條的UV往上0.5格。根據你有幾條顏色就除以2倍的顏色條數量。
@@ -171,7 +177,7 @@
                     float4 MainTex = tex2D(_MainTex,o.uv);
                     MainTex.rgb = lerp(MainTex.rgb*RampColor.rgb,MainTex.rgb,FaceShadow*attenuation);
                     MainTex.rgb*= _LightColor0.rgb;
-                    return fixed4(MainTex.rgb,1);
+                    return fixed4(MainTex.rgb+LDotV*VdotN*rim,1);
                 }
 ///// High Light:
                 float3 reflactionDir = reflect(-LightDir,o.normal);
@@ -181,7 +187,6 @@
                 Specular = pow(Specular,100);
                 Specular *= LightMap.z*20;
                 half3 MetalLight = LightMap.z*(VdotRE>0.85)*3;
-
                 col.rgb += MetalLight + Specular + LDotV*VdotN*rim;
                 return fixed4(col.rgb,1);
             }
