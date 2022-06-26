@@ -18,7 +18,7 @@
         Tags { "RenderType"="Opaque" }
         LOD 100
         Pass{
-            Blend SrcAlpha OneMinusDstAlpha
+            Blend SrcAlpha OneMinusSrcAlpha
             Cull Front
             CGPROGRAM
             #pragma vertex vert
@@ -30,16 +30,14 @@
             {
                 float4 vertex : POSITION;
                 float2 uv : TEXCOORD0;
-                float3 normal : NORMAL;
                 float4 tangent : TANGENT;
-                float4 color : COLOR;
+                float4 vertexColor : COLOR;
             };
 
             struct v2f
             {
                 float2 uv : TEXCOORD0;
                 float4 vertex : SV_POSITION;
-                float4 tangent : TEXCOORD1;
             };
 
             sampler2D _MainTex , _LightMap;
@@ -51,13 +49,10 @@
             v2f vert (appdata v)
             {
                 v2f o;
-                o.tangent = 0;
 				half3 clipnormal = mul((half3x3)UNITY_MATRIX_MVP,v.tangent.xyz); //不用UnityObjectToClipPos的原因是官方經過簡化，導致這組參數的結果有誤差，繪使角色不在中心時，描邊會位移
-				o.vertex = UnityObjectToClipPos(v.vertex);
-				half2 offset = normalize(clipnormal.xy) / _ScreenParams.xy * _OutLine *o.vertex.w * v.color.r;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+				half2 offset = normalize(clipnormal.xy) / _ScreenParams.xy * _OutLine * o.vertex.w * v.vertexColor.r ;
 				o.vertex.xy += offset;
-                o.vertex.z *=0.995;
-                v.normal = normalize(v.normal);
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 return o;
             }
@@ -78,7 +73,7 @@
             Tags{
             "LightMode"="ForwardBase"
             }
-            Blend SrcAlpha OneMinusDstAlpha
+            Blend One Zero
             Cull Back
             CGPROGRAM
             #pragma vertex vert
@@ -107,7 +102,7 @@
             };
 
             sampler2D _MainTex , _LightMap , _RampColor ,_FaceMap ,_CameraDepthTexture;
-            float4 _MainTex_ST , _FaceShadowColor , LightDirEulerRotate ;
+            float4 _MainTex_ST , _FaceShadowColor , LightDirEulerRotate , LocalPosition , MainCamPos;
             half _UseFaceMap , _RampColorCount ;
 
             v2f vert (appdata v)
@@ -123,17 +118,34 @@
 
             fixed4 frag (v2f o) : SV_Target
             {
+//// Struct Light:
+                float3 LightDir = _WorldSpaceLightPos0.xyz;
+                float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz-o.worldPos.xyz);
+                float LDotN = (dot(LightDir,o.normal))*0.5+0.5;
+                float LDotV = 1-dot(normalize(_WorldSpaceCameraPos.xyz),LightDir);
+                //float VdotN = 1-saturate(normalize(dot(ViewDir.xyz,o.normal)));
+                float VdotN = 1-saturate(dot(ViewDir.xyz,o.normal));
+                VdotN = InverseLerp(0.5,1,VdotN);
+//// Struct Light Dir:
                 float attenuation = 1;
                 float rim = 0;
+                float3 Front = UnityObjectToWorldDir(float3(0,0,1));
+                float3 Up = UnityObjectToWorldDir(float3(0,1,0));
+                float3 Right = cross(Up,Front);
+
+                float UpRight = dot(LightDir.rgb,Up);
+                float FrontRight = dot(LightDir.rgb,Right);
+                float3 ViewFront = normalize(_WorldSpaceCameraPos.xyz-LocalPosition);//normalize(mul(unity_WorldToCamera,_WorldSpaceCameraPos));
+                //return fixed4(ViewFront.zzz,1); 
+//// Full-Shadow:
                 #if defined(SHADOWS_SCREEN)
 				    half2 depthUV = o.projPos.xy/o.projPos.w;
-//// Full-Shadow:
                     attenuation = tex2D(_ShadowMapTexture, depthUV); 
                     //attenuation = saturate(attenuation+0.5);
 //// DepthTex: //硬邊緣高光需要有深度圖來做使用，一般來說只要開啟陰影投射，就必須使用到深度圖，所以不用白不用就寫在一起了。
                     half rimSide = sin(radians(LightDirEulerRotate.y)); //根據光線的方向去做深度圖UV的偏移。
-                    const float limitoffset = 0.01/o.pos.w; //值如果太小，鏡頭拉遠很容易會被直接忽略掉，造成clip的現象。
-                    const float2 depthoffset = float2(rimSide*limitoffset,limitoffset);
+                    const float limitoffset = 0.005/o.pos.w; //值如果太小，鏡頭拉遠很容易會被直接忽略掉，造成clip的現象。
+                    const float2 depthoffset = float2(limitoffset*rimSide*ViewFront.z,limitoffset);
 				    half2 depthUVOffset = depthUV + depthoffset;
 				    half depth = tex2D(_CameraDepthTexture, depthUVOffset).r;
 				    half depthOriginal = tex2D(_CameraDepthTexture, depthUV).r;
@@ -142,16 +154,8 @@
 				    rim = depth-depthOriginal;
                     rim = step(0.0001/o.pos.w,rim); //除以o.pos.w可以出現更多高量的細節。
                     rim *= _LightColor0.a;
+                    //return fixed4(rim.xxx,1);
                 #endif
-///// Struct Light:
-                float3 LightDir = _WorldSpaceLightPos0.xyz;
-                float3 ViewDir = normalize(_WorldSpaceCameraPos.xyz-o.worldPos.xyz);
-                float LDotN = (dot(LightDir,o.normal))*0.5+0.5;
-                float LDotV = 1-dot(normalize(_WorldSpaceCameraPos.xyz),LightDir);
-                //float VdotN = 1-saturate(normalize(dot(ViewDir.xyz,o.normal)));
-                float VdotN = 1-saturate(dot(ViewDir.xyz,o.normal));
-                VdotN = InverseLerp(0.5,1,VdotN);
-                //return fixed4(VdotN.xxx,1);
 ///// Struct Texture:
                 fixed4 LightMap = tex2D(_LightMap,o.uv);
                 fixed4 RampColor = tex2D(_RampColor,float2(saturate(LDotN*attenuation),LightMap.a+(1/(_RampColorCount*2))));//使用黑白灰階圖讀取要使用的顏色條，但是因為各種顏色值都為極端值，所以必須讓這些顏色條的UV往上0.5格。根據你有幾條顏色就除以2倍的顏色條數量。
@@ -160,20 +164,15 @@
                 col.rgb *= _LightColor0.rgb;
                 if(_UseFaceMap){
                     fixed4 FaceMap = tex2D(_FaceMap,o.uv);  
-                    float3 Front = UnityObjectToWorldDir(float3(0,0,1));
-                    float3 Up = UnityObjectToWorldDir(float3(0,1,0));
-                    float3 Right = cross(Up,Front);
-
-                    float UpRight = dot(LightDir.rgb,Up);
-                    float FrontRight = dot(LightDir.rgb,Right);
-
-                    if(FrontRight == 0 && UpRight > 0)
-                        FaceMap = 1;
+                    
+                    if(FrontRight > 0 )
+                        FaceMap = tex2D(_FaceMap,float2(o.uv.x,o.uv.y));
                     if(FrontRight < 0)
                         FaceMap = tex2D(_FaceMap,float2(-o.uv.x,o.uv.y));
 
                     float fixdegress = abs(cos(radians(LightDirEulerRotate.x)));//因應平行光的X軸會影響貼圖的閾值，所以貼圖顏色跟著Clamp。
-                    float FaceShadow = smoothstep(FaceMap.r*fixdegress,(FaceMap.r+0.01)*fixdegress,UpRight);
+                    float FaceShadow = smoothstep((FaceMap.r-0.01)*fixdegress,FaceMap.r*fixdegress,UpRight);
+                    //return fixed4((FaceMap.r*fixdegress).xxx,1);
                     float4 MainTex = tex2D(_MainTex,o.uv);
                     MainTex.rgb = lerp(MainTex.rgb*RampColor.rgb,MainTex.rgb,FaceShadow*attenuation);
                     MainTex.rgb*= _LightColor0.rgb;
@@ -187,7 +186,7 @@
                 Specular = pow(Specular,100);
                 Specular *= LightMap.z*20;
                 half3 MetalLight = LightMap.z*(VdotRE>0.85)*3;
-                col.rgb += MetalLight + Specular + LDotV*VdotN*rim;
+                col.rgb += MetalLight + Specular + LDotV*VdotN*rim*_LightColor0.rgb;
                 return fixed4(col.rgb,1);
             }
             ENDCG
